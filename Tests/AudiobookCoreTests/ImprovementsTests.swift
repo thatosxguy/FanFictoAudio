@@ -56,10 +56,12 @@ struct ImprovementsTests {
 
     @Test func commandTimeoutIsBounded() async throws {
         let runner = ProcessRunner(cancellationGrace: 0.1, commandTimeout: 0.15)
+        let start = ContinuousClock.now
         do {
             _ = try await runner.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "trap '' TERM; exec /bin/sleep 30"])
             Issue.record("Expected timeout")
         } catch { #expect(error.localizedDescription.contains("timeout")) }
+        #expect(start.duration(to: .now) < .seconds(2))
     }
 
     @Test func usageIsPersistentAndBlocksBeforeDispatchIncludingFailedRequests() async throws {

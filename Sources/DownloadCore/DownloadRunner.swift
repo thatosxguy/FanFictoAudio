@@ -5,6 +5,7 @@ import Darwin
 /// publication ACK share one lock, so a saved book cannot be called cancelled.
 public final class DownloadRunner: @unchecked Sendable {
     private let lock = NSLock()
+    private let executionQueue = DispatchQueue(label: "FanFicToAudio.download-process", qos: .userInitiated)
     private var process: Process?
     private var cancelled = false
     private var finalizing = false
@@ -22,9 +23,12 @@ public final class DownloadRunner: @unchecked Sendable {
                     onEvent: @escaping @Sendable (DownloadEvent) -> Void) async throws -> DownloadEvent {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            return try await Task.detached { [self] in
-                try runSync(request, executable: executable, arguments: arguments, onEvent: onEvent)
-            }.value
+            return try await withCheckedThrowingContinuation { continuation in
+                executionQueue.async { [self] in
+                    do { continuation.resume(returning: try runSync(request, executable: executable, arguments: arguments, onEvent: onEvent)) }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
         } onCancel: { self.cancel() }
     }
 

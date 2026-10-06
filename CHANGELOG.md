@@ -8,7 +8,7 @@
 - Track AI attempts across previews, retries, and failed requests; add persistent character and estimated USD budgets with user-entered per-model rates.
 - Add per-book settings/section editing and drag reordering, retaining the move buttons.
 - Fix selection/open-book disagreement during individual exports and downloads, 192 kbps local encoding, and multilingual preview bounds.
-- Bound subprocess cancellation and command deadlines; cache word/text counts and reuse speech API connections.
+- Bound subprocess cancellation and command deadlines; keep blocking audio/download waits off Swift task threads so smaller machines can still deliver cancellation and timers. Cache word/text counts and reuse speech API connections.
 - Add inside-out Developer ID signing, hardware-token support, optional notarization/stapling, ZIP/DMG packaging, and locked build dependencies.
 - Require FFmpeg explicitly in audio integration tests and add recovery, budget, metadata, preview, cancellation, and selection regressions.
 

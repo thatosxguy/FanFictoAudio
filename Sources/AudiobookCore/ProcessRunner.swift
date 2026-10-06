@@ -10,6 +10,9 @@ public struct ProcessOutput: Sendable {
 // cancelling between two commands cannot leave the next command running.
 public final class ProcessRunner: @unchecked Sendable {
     private let lock = NSLock()
+    // Blocking process waits must not occupy Swift's cooperative task threads.
+    private let executionQueue = DispatchQueue(label: "FanFicToAudio.process", qos: .userInitiated)
+    private static let controlQueue = DispatchQueue(label: "FanFicToAudio.process-control", qos: .userInitiated)
     private var active: Process?
     private var cancelled = false
     private var timedOut = false
@@ -32,7 +35,7 @@ public final class ProcessRunner: @unchecked Sendable {
     private func terminate(_ process: Process) {
         guard process.isRunning else { return }
         process.terminate()
-        DispatchQueue.global().asyncAfter(deadline: .now() + cancellationGrace) { [self] in
+        Self.controlQueue.asyncAfter(deadline: .now() + cancellationGrace) { [self] in
             lock.lock()
             defer { lock.unlock() }
             if active === process, process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
@@ -57,7 +60,12 @@ public final class ProcessRunner: @unchecked Sendable {
     public func run(_ executable: URL, arguments: [String]) async throws -> ProcessOutput {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            return try await Task.detached { [self] in try runSync(executable, arguments: arguments) }.value
+            return try await withCheckedThrowingContinuation { continuation in
+                executionQueue.async { [self] in
+                    do { continuation.resume(returning: try runSync(executable, arguments: arguments)) }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
         } onCancel: { self.cancel() }
     }
 
@@ -85,7 +93,7 @@ public final class ProcessRunner: @unchecked Sendable {
         do { try process.run() }
         catch { active = nil; lock.unlock(); throw error }
         lock.unlock()
-        let deadline = DispatchSource.makeTimerSource(queue: .global())
+        let deadline = DispatchSource.makeTimerSource(queue: Self.controlQueue)
         deadline.setEventHandler { [weak self] in self?.expire(process) }
         deadline.schedule(deadline: .now() + commandTimeout)
         deadline.resume()
