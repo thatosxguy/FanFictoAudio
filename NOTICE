@@ -1,0 +1,16 @@
+FanFic to Audio
+Copyright 2026 Matt and contributors.
+
+Includes the download, session, and network modules adapted from
+FanFicFare Desktop, copyright 2026 thatosxguy and contributors,
+licensed under the Apache License, Version 2.0. The original notice
+is retained in Resources/FanFicFare-Desktop-NOTICE.txt.
+
+The EPUB reader, narration engine, and original native interface were
+combined from the user's EPUB to MP3 project. The app is an independent
+interface using the separately maintained FanFicFare engine and its adapters.
+
+Python, FanFicFare, and their bundled dependencies retain their respective
+licenses. Their license notices are included in the packaged application's
+Contents/Resources/ThirdPartyNotices and Downloader directories.
+FFmpeg is detected locally and is not bundled.

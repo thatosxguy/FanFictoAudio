@@ -1,0 +1,4 @@
+# Direct dependencies used for the 1.2.0 release; transitive dependencies resolve through pip.
+FanFicFare[image_processing]==4.62.0
+pyinstaller==6.22.3
+pytest==9.1.1

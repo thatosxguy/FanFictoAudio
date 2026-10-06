@@ -1,0 +1,23 @@
+.build/
+.venv*/
+build/
+dist/
+__pycache__/
+.pytest_cache/
+.DS_Store
+personal.ini
+*.ini
+!pytest.ini
+.env
+.env.*
+!.env.example
+*.py[cod]
+*.sqlite*
+*.log
+*.app/
+*.zip
+Books/
+# Local validation screenshots contain personal paths and are not public assets.
+docs/*.png
+*.mp3
+*.epub

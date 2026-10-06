@@ -1,0 +1,65 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: Offline tests and app packaging
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+      - name: Install dependencies
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            brew install ffmpeg
+          fi
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements-build.txt
+      - name: Native regression tests
+        run: ./Scripts/swift.sh test
+      - name: Python regression tests
+        run: PYTHONPATH="$PWD/Vendor" .venv/bin/python -m pytest -q Tests/DownloadEngineTests
+      - name: Build app and verify signature
+        run: |
+          ./Scripts/build-app.sh
+          codesign --verify --deep --strict 'dist/FanFic to Audio.app'
+      - name: Check the packaged offline downloader
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import zipfile
+          helper = Path('dist/FanFic to Audio.app/Contents/Resources/Downloader/fanfic-download').resolve()
+          with tempfile.TemporaryDirectory() as folder:
+              request = Path(folder) / 'request.json'
+              request.write_text(json.dumps({'operation': 'download', 'source': 'http://test1.com?sid=1[1-2]', 'format': 'epub', 'output': folder}))
+              result = subprocess.run([str(helper), '--request', str(request)], input='commit\n', text=True, capture_output=True, check=True, timeout=90)
+              events = [json.loads(line) for line in result.stdout.splitlines()]
+              assert any(event.get('finalizing') for event in events)
+              book = Path(events[-1]['path'])
+              with zipfile.ZipFile(book) as archive:
+                  assert archive.read('mimetype') == b'application/epub+zip'
+                  assert archive.testzip() is None
+              print('Packaged offline EPUB download passed')
+          PY
