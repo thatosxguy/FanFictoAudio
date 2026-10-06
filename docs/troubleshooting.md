@@ -17,8 +17,8 @@
 | API preview/export is disabled | Choose the provider, enter your API key, and click **Save Key**. ElevenLabs also needs a valid voice ID. |
 | API authentication or permission error | Check the saved provider key, model, voice access, and account permissions. Remove and replace the key if needed. |
 | API quota or rate error | Check your provider account and retry explicitly when ready. The app does not automatically retry paid speech. |
-| Retrying an audiobook repeats earlier narration | Resume checkpoints are not stored. Retrying starts that audiobook from the beginning and can incur new API charges. |
-| One MP3 lacks chapter navigation | Embedded MP3 chapter markers are not implemented. Select **MP3 per chapter** instead. |
+| Retrying an audiobook repeats earlier narration | Compatible completed passages are reused in version 1.3. Changed text/settings, discarded checkpoints, or the unfinished passage can require new narration and API charges. |
+| One MP3 lacks chapter navigation | Embedded MP3 chapter markers are not implemented. Select **M4B with chapters** or **MP3 per chapter** instead. |
 | A developer smoke test reports silent speech | Run it in a normal local terminal with access to macOS speech services. Restricted command sandboxes can produce silent `say` audio. |
 
 Use the GitHub bug template for reproducible problems. Include app/macOS versions, architecture, provider, and sanitized steps. Do not attach personal INI files, API keys, cookies, private URLs, or copyrighted book/audio content. Site-specific credentials should remain local.

@@ -15,9 +15,13 @@ public struct BookChapter: Identifiable, Sendable {
     public let title: String
     public let text: String
     public let includedByDefault: Bool
-    public var wordCount: Int { text.split(whereSeparator: { $0.isWhitespace }).count }
+    public let wordCount: Int
+    public let characterCount: Int
+    public let utf8Count: Int
     public init(id: String, title: String, text: String, includedByDefault: Bool = true) {
         self.id = id; self.title = title; self.text = text; self.includedByDefault = includedByDefault
+        self.wordCount = text.split(whereSeparator: { $0.isWhitespace }).count
+        self.characterCount = text.unicodeScalars.count; self.utf8Count = text.utf8.count
     }
 }
 
@@ -28,9 +32,11 @@ public struct EPUBBook: Sendable {
     public let chapters: [BookChapter]
     public let source: URL
     public let warnings: [String]
-    public init(title: String, author: String, language: String, chapters: [BookChapter], source: URL, warnings: [String] = []) {
+    public let cover: Data?
+    public init(title: String, author: String, language: String, chapters: [BookChapter], source: URL, warnings: [String] = [], cover: Data? = nil) {
         self.title = title; self.author = author; self.language = language
         self.chapters = chapters; self.source = source; self.warnings = warnings
+        self.cover = cover
     }
 }
 
@@ -58,10 +64,12 @@ public struct SystemVoice: Identifiable, Hashable, Sendable {
     }
 }
 
-public enum ExportMode: String, CaseIterable, Identifiable, Sendable {
+public enum ExportMode: String, CaseIterable, Identifiable, Sendable, Codable {
     case single = "One audiobook MP3"
     case chapters = "MP3 per chapter"
+    case m4b = "M4B with chapters"
     public var id: String { rawValue }
+    public var fileExtension: String { self == .m4b ? "m4b" : "mp3" }
 }
 
 public enum SpeechRate {
@@ -79,9 +87,14 @@ public struct ExportOptions: Sendable {
     public let chapterIDs: Set<String>
     public let ffmpeg: URL
     public let api: APINarration?
-    public init(voice: String, wordsPerMinute: Int, bitrate: Int, mode: ExportMode, chapterIDs: Set<String>, ffmpeg: URL, api: APINarration? = nil) {
+    public let checkpoint: URL?
+    public let usage: APIUsageLedger?
+    public let budget: APIBudget?
+    public init(voice: String, wordsPerMinute: Int, bitrate: Int, mode: ExportMode, chapterIDs: Set<String>, ffmpeg: URL, api: APINarration? = nil,
+                checkpoint: URL? = nil, usage: APIUsageLedger? = nil, budget: APIBudget? = nil) {
         self.voice = voice; self.wordsPerMinute = wordsPerMinute; self.bitrate = bitrate
         self.mode = mode; self.chapterIDs = chapterIDs; self.ffmpeg = ffmpeg; self.api = api
+        self.checkpoint = checkpoint; self.usage = usage; self.budget = budget
     }
 }
 

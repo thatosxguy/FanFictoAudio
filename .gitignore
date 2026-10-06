@@ -20,4 +20,9 @@ Books/
 # Local validation screenshots contain personal paths and are not public assets.
 docs/*.png
 *.mp3
+*.m4b
+*.m4a
+*.wav
+*.aiff
+*.dmg
 *.epub

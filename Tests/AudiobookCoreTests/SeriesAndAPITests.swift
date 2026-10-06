@@ -109,7 +109,7 @@ struct SeriesAndAPITests {
     }
 
     @Test(arguments: [NarrationProvider.openAI, .elevenLabs]) func mockedAPIExportProducesAudibleMP3AndCleansStaging(provider: NarrationProvider) async throws {
-        guard let ffmpeg = SpeechTools.findFFmpeg() else { return }
+        let ffmpeg = try #require(SpeechTools.findFFmpeg(), "FFmpeg is required for the audio integration tests.")
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let wav = root.appendingPathComponent("fixture.wav")
         let format = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!

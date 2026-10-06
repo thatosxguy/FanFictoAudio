@@ -15,6 +15,7 @@ struct ContentView: View {
                     header
                     narrationSettings
                     outputSettings
+                    APIUsageView(model: model)
                     AudiobookQueueView(model: model, queue: model.audiobookQueue)
                     if let book = model.book {
                         Divider()

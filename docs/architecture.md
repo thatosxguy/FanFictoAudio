@@ -10,7 +10,7 @@
 | `Sources/DownloadCore` | Requests, streamed helper events, cancellation, publication acknowledgement |
 | `Vendor/fanficfare_gui` | FanFicFare Desktop download, session, and network modules |
 | `Scripts/download-worker.py` | JSON helper entry point and bridge to the download engine |
-| `Sources/AudiobookCore` | EPUB reading/merging, queue, speech providers, MP3 export |
+| `Sources/AudiobookCore` | EPUB reading/merging, queue, speech providers, MP3/M4B export, checkpoints, usage budgets |
 | `Sources/CZlib` | System zlib bridge for ZIP decompression |
 | `Sources/EPUBAudioCLI` | Inspection, local export, merging, parsing benchmarks |
 | `Scripts` | Packaging, notices, synthetic fixtures, smoke validation |
@@ -36,8 +36,16 @@ A batch takes a shared settings snapshot and processes books sequentially. A fai
 
 Local narration invokes `/usr/bin/say`. OpenAI and ElevenLabs use separate request formats through the same speech-service interface. API passages are bounded and sequential; OpenAI also has a conservative UTF-8 byte limit. Provider errors are mapped to messages without displaying raw response bodies. Paid speech requests have no automatic retry or persisted resume cache.
 
-Each passage becomes decoded PCM audio, which is checked for usable speech data before FFmpeg encoding. A single MP3 joins all passages once; chapter mode writes numbered outputs. Files are staged and then published without overwriting existing destinations. Temporary work is cleaned after success, cancellation, or failure. Queue jobs and book previews live in memory for the current session.
+Each passage becomes decoded PCM audio, which is checked for usable speech data before FFmpeg encoding. A single MP3 joins all passages once; chapter mode writes numbered outputs. Files are staged and then published without overwriting existing destinations. Temporary work is cleaned after success, cancellation, or failure. Audiobook jobs and completed passages are saved for recovery; book previews and download jobs remain in memory for the current session.
 
 ## Boundaries
 
 Provider keys belong to macOS Keychain; ordinary choices and paths belong to UserDefaults. AI generation sends text to the selected external service, while local speech and encoding stay on the Mac. Download site configuration can enable additional upstream network behavior. This app is not distributed with the macOS App Sandbox enabled. See [Privacy](../PRIVACY.md) and [Security](../SECURITY.md).
+
+## Queue and narration recovery
+
+`AudiobookQueue` atomically persists a versioned JSON snapshot. Running jobs recovered after a crash become queued unless their atomically published output already exists. Presets serialize provider/model/voice/style/speed/output choices, never API keys. Credentials are resolved before a batch starts. Budget failures pause later jobs rather than sending further requests.
+
+`ConversionCheckpoint` hashes book metadata, all chapter text and selection, cover bytes, and a credential-free preset with an encoding schema version. Completed encoded passages have SHA-256 checksums and measured durations. Export staging is always cleaned; checkpoints survive failed/cancelled attempts and are removed after publication. MP3 and AAC passages are joined once. M4B uses measured durations to create FFmetadata chapters and embeds supported cover art.
+
+`APIUsageLedger` serializes reservations before speech dispatch. Failed/cancelled attempts remain counted conservatively; cached passages do not reserve again. Rates and costs are manual estimates, not provider billing records. Speech requests use a pooled ephemeral URLSession with cookies/credential storage disabled and redirects rejected. The subprocess runner owns each process, sends SIGTERM on cancellation/deadline, and escalates to SIGKILL after a grace period with process-identity checks.

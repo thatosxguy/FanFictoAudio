@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 
 public enum EPUBReader {
     public static func read(_ url: URL) throws -> EPUBBook {
@@ -82,8 +83,21 @@ public enum EPUBReader {
                                         includedByDefault: ref.attr("linear") != "no" && !isNavigation))
         }
         guard !chapters.isEmpty else { throw AudiobookError.invalidEPUB("This EPUB has no readable text in its reading order. Scanned pages cannot be narrated.") }
+        let legacyCoverID = try package.nodes(forXPath: "//*[local-name()='metadata']/*[local-name()='meta' and @name='cover']").first
+            .flatMap { ($0 as? XMLElement)?.attr("content") }
+        let coverItem = items.values.first { $0.properties.split(separator: " ").contains("cover-image") } ?? legacyCoverID.flatMap { items[$0] }
+        var cover: Data?
+        if let coverItem, ["image/jpeg", "image/png"].contains(coverItem.type), !encrypted.contains(coverItem.path) {
+            if let data = try? archive.read(coverItem.path), data.count <= 16 * 1024 * 1024,
+               let image = CGImageSourceCreateWithData(data as CFData, nil),
+               let properties = CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [CFString: Any],
+               let width = properties[kCGImagePropertyPixelWidth] as? Int,
+               let height = properties[kCGImagePropertyPixelHeight] as? Int,
+               width > 0, height > 0, width <= 8192, height <= 8192, width * height <= 40_000_000 { cover = data }
+            else { warnings.append("The cover image could not be used for audiobook artwork.") }
+        }
         return EPUBBook(title: title.isEmpty ? url.deletingPathExtension().lastPathComponent : title,
-                        author: author, language: language, chapters: chapters, source: url, warnings: warnings)
+                        author: author, language: language, chapters: chapters, source: url, warnings: warnings, cover: cover)
     }
 
     static func resolve(_ href: String, relativeTo document: String) throws -> String {

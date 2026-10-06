@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 — 2026-10-06
+
+- Save audiobook queue order, selections, states, and credential-free per-book narration settings across launches.
+- Resume completed passages after cancellation, failure, or interruption; invalidate incompatible content/settings and verify cached audio checksums.
+- Add M4B output with AAC audio, chapter navigation, and EPUB JPEG/PNG cover art.
+- Track AI attempts across previews, retries, and failed requests; add persistent character and estimated USD budgets with user-entered per-model rates.
+- Add per-book settings/section editing and drag reordering, retaining the move buttons.
+- Fix selection/open-book disagreement during individual exports and downloads, 192 kbps local encoding, and multilingual preview bounds.
+- Bound subprocess cancellation and command deadlines; cache word/text counts and reuse speech API connections.
+- Add inside-out Developer ID signing, hardware-token support, optional notarization/stapling, ZIP/DMG packaging, and locked build dependencies.
+- Require FFmpeg explicitly in audio integration tests and add recovery, budget, metadata, preview, cancellation, and selection regressions.
+
 ## 1.2.0 — 2026-10-06
 
 - Move waiting audiobook jobs up or down; the book preview follows the selected row and active conversion.
