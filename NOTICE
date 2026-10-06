@@ -1,6 +1,16 @@
 FanFic to Audio
 Copyright 2026 Matt and contributors.
 
+Story downloading is powered by FanFicFare, by Jim Miller (JimmXinu)
+and the FanFicFare contributors:
+https://github.com/JimmXinu/FanFicFare
+FanFicFare provides the download engine, site adapters, metadata,
+EPUB creation and updates, and story-link extraction used by this app.
+The bundled FanFicFare Python engine is licensed under Apache 2.0.
+Its original copyright and license notices are retained in the bundle.
+FanFic to Audio is an independent application, not an official
+FanFicFare release.
+
 Includes the download, session, and network modules adapted from
 FanFicFare Desktop, copyright 2026 thatosxguy and contributors,
 licensed under the Apache License, Version 2.0. The original notice

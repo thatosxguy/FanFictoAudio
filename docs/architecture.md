@@ -20,7 +20,7 @@
 
 The native queue starts one helper job at a time. The Python helper writes a complete EPUB in staging and validates it, then sends a finalizing event. The native bridge acknowledges publication through stdin before the helper moves the output into place. Cancellation before acknowledgement cleans staging; publication is allowed to finish once acknowledged. Existing output names receive numeric suffixes; update operations preserve a backup next to the original book.
 
-FanFicFare handles site adapters and authentication. Only packaged defaults and an explicitly selected INI are loaded. Session reuse is scoped by site, format, INI fingerprint, adult confirmation, and applicable story-specific settings; bounded caches and connections close with the worker. Site request pacing remains in effect. Downloading and audiobook conversion are separate queue operations.
+The upstream [FanFicFare](https://github.com/JimmXinu/FanFicFare) engine, by Jim Miller (JimmXinu) and its contributors, implements story downloads, site adapters, metadata extraction, EPUB writing and updates, link extraction, and authentication. The native interface and helper coordinate that engine. Only packaged defaults and an explicitly selected INI are loaded. Session reuse is scoped by site, format, INI fingerprint, adult confirmation, and applicable story-specific settings; bounded caches and connections close with the worker. Site request pacing remains in effect. Downloading and audiobook conversion are separate queue operations.
 
 ## EPUBs and series
 

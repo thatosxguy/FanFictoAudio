@@ -3,7 +3,9 @@
 [![Tests](https://github.com/thatosxguy/FanFictoAudio/actions/workflows/ci.yml/badge.svg)](https://github.com/thatosxguy/FanFictoAudio/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Download fanfiction as EPUB, then turn it into an audiobook in one native Mac app. FanFic to Audio combines a SwiftUI interface, the FanFicFare download engine, and local or AI narration.
+Download fanfiction as EPUB, then turn it into an audiobook in one native Mac app. FanFic to Audio combines a SwiftUI interface, the [FanFicFare](https://github.com/JimmXinu/FanFicFare) download engine, and local or AI narration.
+
+**Powered by FanFicFare**, by **Jim Miller (JimmXinu) and the FanFicFare contributors**. FanFicFare provides the story download engine and site adapters used by this app.
 
 **[Download the macOS app](https://github.com/thatosxguy/FanFictoAudio/releases/latest)** · **[Installation guide](docs/installation.md)** · **[User guide](docs/usage.md)**
 
@@ -69,8 +71,14 @@ PYTHONPATH="$PWD/Vendor" .venv/bin/python -m pytest -q Tests/DownloadEngineTests
 
 The app is written to `dist/FanFic to Audio.app`. See [development instructions](docs/development.md) for a clean-clone walkthrough, smoke validation, and release packaging. The supplied release is Apple silicon; an Intel app bundle has not been validated.
 
-## Limits and attribution
+## Limits
 
 Only unprotected EPUBs with readable text are supported. There is no OCR, M4B output, embedded MP3 chapter navigation, persistent queue, or checkpointed audiobook resume. Downloads and narration are separate workflow steps. Site support and authentication depend on FanFicFare; interactive login and browser challenges are not handled by this interface.
 
-This project is licensed under [Apache 2.0](LICENSE). It includes downloader modules from FanFicFare Desktop and EPUB narration components from the EPUB to MP3 project. FanFicFare and bundled dependencies retain their own licenses; dependency notices ship inside the app. FFmpeg and Qt are not bundled. See [NOTICE](NOTICE).
+## Credits and license
+
+Thank you to **Jim Miller (JimmXinu) and all FanFicFare contributors** for [FanFicFare](https://github.com/JimmXinu/FanFicFare). Its engine powers story downloads, website adapters, metadata previews, EPUB creation and updates, and story-link extraction. See the [FanFicFare documentation](https://github.com/JimmXinu/FanFicFare/wiki) and [upstream license](https://github.com/JimmXinu/FanFicFare/blob/main/LICENSE).
+
+FanFic to Audio is an independent application and is not an official FanFicFare release. This project's native interface and integration are licensed under [Apache 2.0](LICENSE). The bundled FanFicFare Python engine is also licensed under Apache 2.0; its separately distributed Calibre plugin is GPLv3 and is not bundled here.
+
+The app also includes downloader interface modules from FanFicFare Desktop and EPUB narration components from the EPUB to MP3 project. FanFicFare and other dependencies retain their original copyright and license notices, which ship inside the app. FFmpeg and Qt are not bundled. See [NOTICE](NOTICE).

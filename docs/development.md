@@ -15,7 +15,7 @@ python3.12 -m venv .venv
 
 Use Swift 6 or later and Python 3.12. The package targets macOS 14 or later. The build wrapper supports Command Line Tools and full Xcode installations and keeps compiler caches in `.build`. Homebrew users can install the build/runtime prerequisites with `brew install python@3.12 ffmpeg`.
 
-`requirements-build.txt` pins the direct dependencies used for version 1.2.0: FanFicFare 4.62.0, PyInstaller 6.22.3, and pytest 9.1.1. Transitive dependencies resolve through pip; this is not a complete reproducible-build lockfile. No remote Swift packages are required. Build architecture follows the Swift toolchain and Python interpreter; the release asset is arm64, not universal.
+`requirements-build.txt` pins the direct dependencies used for version 1.2.0: [FanFicFare](https://github.com/JimmXinu/FanFicFare) 4.62.0, PyInstaller 6.22.3, and pytest 9.1.1. FanFicFare is the upstream download engine by Jim Miller (JimmXinu) and its contributors; preserve its [license and attribution](https://github.com/JimmXinu/FanFicFare/blob/main/LICENSE) when packaging. Transitive dependencies resolve through pip; this is not a complete reproducible-build lockfile. No remote Swift packages are required. Build architecture follows the Swift toolchain and Python interpreter; the release asset is arm64, not universal.
 
 ## Run tests
 

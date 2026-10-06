@@ -59,7 +59,7 @@ The companion CLI includes `benchmark-read BOOK.epub` for comparing 20 fresh rea
 - Successful downloads never overwrite existing filenames. The app acknowledges a complete, validated EPUB before the helper publishes it. Cancellation is disabled briefly while the book is saved.
 - The queue lasts for the current app session. Destination, INI path, voice, speed, and bitrate are remembered in this app's own settings. INI contents and adult-access confirmation are not saved by the interface.
 
-FanFicFare provides the site adapters and authentication behavior. Site restrictions and browser challenges can require a configured INI; interactive password or two-factor prompts are not supported. The app reads only packaged defaults and your explicitly selected INI, and does not run FanFicFare CLI shell hooks.
+[FanFicFare](https://github.com/JimmXinu/FanFicFare), by Jim Miller (JimmXinu) and its contributors, powers story downloads, EPUB writing and updates, metadata previews, link extraction, site adapters, and authentication behavior. Its [documentation](https://github.com/JimmXinu/FanFicFare/wiki) covers site support and INI configuration. Site restrictions and browser challenges can require a configured INI; interactive password or two-factor prompts are not supported. The app reads only packaged defaults and your explicitly selected INI, and does not run FanFicFare CLI shell hooks.
 
 ## Narration requirements
 
