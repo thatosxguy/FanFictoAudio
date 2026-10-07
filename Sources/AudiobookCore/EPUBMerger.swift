@@ -45,6 +45,8 @@ public enum EPUBMerger {
                 resources.append(("EPUB/" + prefix + path, data))
             }
             var paths: [String: String] = [:]
+            let legacyCoverID = try package.nodes(forXPath: "//*[local-name()='metadata']/*[local-name()='meta' and @name='cover']").first
+                .flatMap { ($0 as? XMLElement)?.attribute(forName: "content")?.stringValue }
             for case let item as XMLElement in try package.nodes(forXPath: "//*[local-name()='manifest']/*[local-name()='item']") {
                 guard let id = attr(item, "id"), let href = attr(item, "href") else { continue }
                 let itemPath = try EPUBReader.resolve(href, relativeTo: packagePath)
@@ -61,6 +63,12 @@ public enum EPUBMerger {
                     default: updated = value
                     }
                     if !updated.isEmpty { attributes.append("\(name)=\"\(escape(updated))\"") }
+                }
+                if index == 0, id == legacyCoverID, !(attr(item, "properties") ?? "").split(separator: " ").contains("cover-image") {
+                    if let propertiesIndex = attributes.firstIndex(where: { $0.hasPrefix("properties=") }) {
+                        let properties = (attr(item, "properties") ?? "").split(separator: " ").filter { $0 != "nav" }.joined(separator: " ")
+                        attributes[propertiesIndex] = "properties=\"\(escape(properties + " cover-image"))\""
+                    } else { attributes.append("properties=\"cover-image\"") }
                 }
                 manifest.append("<item \(attributes.joined(separator: " "))/>")
             }
@@ -106,7 +114,7 @@ public enum EPUBMerger {
         let verified = try EPUBReader.read(temp)
         try Task.checkCancellation()
         try FileManager.default.moveItem(at: temp, to: destination)
-        return EPUBBook(title: verified.title, author: verified.author, language: verified.language, chapters: verified.chapters, source: destination, warnings: verified.warnings)
+        return EPUBBook(title: verified.title, author: verified.author, language: verified.language, chapters: verified.chapters, source: destination, warnings: verified.warnings, cover: verified.cover)
     }
     private static func attr(_ node: XMLElement, _ name: String) -> String? { node.attribute(forName: name)?.stringValue }
     private static func xml(_ data: Data) throws -> XMLDocument { try XMLDocument(data: data, options: [.nodeLoadExternalEntitiesNever]) }

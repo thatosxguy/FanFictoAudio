@@ -15,6 +15,7 @@ let package = Package(
         .executableTarget(name: "FanFicToAudio", dependencies: ["AudiobookCore", "DownloadCore"]),
         .executableTarget(name: "EPUBAudioCLI", dependencies: ["AudiobookCore"]),
         .testTarget(name: "AudiobookCoreTests", dependencies: ["AudiobookCore"]),
-        .testTarget(name: "DownloadCoreTests", dependencies: ["DownloadCore"])
+        .testTarget(name: "DownloadCoreTests", dependencies: ["DownloadCore"]),
+        .testTarget(name: "FanFicToAudioTests", dependencies: ["FanFicToAudio"])
     ]
 )

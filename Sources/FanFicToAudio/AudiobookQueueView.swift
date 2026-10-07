@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import AudiobookCore
 
 struct AudiobookQueueView: View {
@@ -17,7 +18,7 @@ struct AudiobookQueueView: View {
                 }
                 Button("Add EPUBs…", action: model.chooseQueuedEPUBs).disabled(model.busy)
             }
-            Text("Select multiple EPUBs or drop them here. Voice, speed, quality, and output mode above apply to the whole batch.")
+            Text("The queue is saved automatically. New books use the settings above; you can save separate settings and sections for each selected book.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -36,7 +37,7 @@ struct AudiobookQueueView: View {
                     Image(systemName: "books.vertical").font(.system(size: 30)).foregroundStyle(accent)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Make audiobooks in bulk").font(.callout.weight(.medium))
-                        Text("Each book gets its own MP3 or chapter folder. Existing audiobooks are preserved.")
+                        Text("Each book gets its own MP3, M4B, or chapter folder. Existing audiobooks are preserved.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -57,6 +58,10 @@ struct AudiobookQueueView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(job.title).font(.callout.weight(.medium)).lineLimit(2)
                                         if !job.author.isEmpty { Text(job.author).font(.caption).foregroundStyle(.secondary) }
+                                        if let preset = job.narration {
+                                            Text("\(preset.provider.rawValue) · \(preset.provider == .system ? preset.voice : preset.apiVoice) · \(preset.mode.rawValue)")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
                                         Text(job.message).font(.caption).foregroundStyle(job.state == .failed ? .red : .secondary).lineLimit(3)
                                         if job.state == .running { ProgressView(value: job.progress) }
                                     }
@@ -67,10 +72,20 @@ struct AudiobookQueueView: View {
                                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                                     .background(model.selectedQueueJob == job.id ? accent.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
-                                }.buttonStyle(.plain).disabled(queue.isRunning || model.isCombining)
+                                }.buttonStyle(.plain).disabled(!model.canSelectQueue)
+                                    .onDrag { NSItemProvider(object: job.id.uuidString as NSString) }
+                                    .onDrop(of: [UTType.text], isTargeted: nil) { providers in
+                                        guard !model.busy, let provider = providers.first else { return false }
+                                        _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                                            guard let text = object as? String, let id = UUID(uuidString: text) else { return }
+                                            Task { @MainActor in if !model.busy { queue.move(id, before: job.id) } }
+                                        }
+                                        return true
+                                    }
                             }
                         }
                     }
+
                 }.frame(maxHeight: 240)
                 if let job = queue.jobs.first(where: { $0.id == model.selectedQueueJob }) {
                     HStack {
@@ -88,6 +103,13 @@ struct AudiobookQueueView: View {
                             model.selectedQueueJob = queue.jobs.first?.id
                         }.disabled(model.busy)
                         Button("Clear Completed", action: model.clearCompletedAudiobooks).disabled(model.busy)
+                    }
+                    if job.state != .done {
+                        HStack {
+                            Button("Save Current Settings & Sections for Selected Book", action: model.saveSelectedJobSettings)
+                                .disabled(model.busy || model.book?.source != job.source || model.selectedChapters.isEmpty)
+                            Button("Discard Saved Passages") { queue.discardCheckpoint(job.id) }.disabled(model.busy)
+                        }
                     }
                 }
             }
@@ -109,6 +131,7 @@ struct AudiobookQueueView: View {
                 }.disabled(model.busy)
             }
             if queue.isRunning { ProgressView(value: queue.batchProgress) }
+            if let error = queue.persistenceError { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Text(queue.summary).font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -121,12 +144,12 @@ struct AudiobookQueueView: View {
             }
             if model.ffmpeg == nil {
                 HStack {
-                    Text("Select FFmpeg to enable MP3 conversion.").font(.caption).foregroundStyle(.secondary)
+                    Text("Select FFmpeg to enable audiobook conversion.").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Choose FFmpeg…", action: model.chooseFFmpeg).disabled(model.busy)
                 }
             }
-            Text("Select a queue row to open its EPUB. During conversion, the open book follows the active job. Books from disk use their default sections; Add Open Book keeps your section selection.")
+            Text("Select a row to open its EPUB, or drag rows into reading order. During conversion, the open book follows the active job. Retry resumes completed passages when the content and settings match. Removing a book discards its saved passages.")
                 .font(.caption2).foregroundStyle(.secondary)
         }.padding(20).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
     }

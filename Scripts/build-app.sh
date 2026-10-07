@@ -24,7 +24,7 @@ cp "$project_root/LICENSE" "$project_root/NOTICE" "$app_path/Contents/Resources/
 # Preserve the notices delivered with the original downloader sources.
 cp "$project_root/Resources/FanFicFare-Desktop-NOTICE.txt" "$app_path/Contents/Resources/"
 "$python_path" "$project_root/Scripts/collect-notices.py" "$app_path/Contents/Resources/ThirdPartyNotices"
-/usr/bin/codesign --force --deep --sign - "$app_path"
+"$python_path" "$project_root/Scripts/sign-app.py" "$app_path" --identity "${SIGNING_IDENTITY:--}"
 final_path="$project_root/dist/FanFic to Audio.app"
 if [[ -d "$final_path" ]]; then
     backup_dir="$project_root/dist/Previous Builds"

@@ -21,14 +21,14 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(bitrate, forKey: "mp3Bitrate") }
     }
     @Published var provider = NarrationProvider(rawValue: UserDefaults.standard.string(forKey: "narrationProvider") ?? "") ?? .system {
-        didSet { UserDefaults.standard.set(provider.rawValue, forKey: "narrationProvider"); apiKeyDraft = ""; refreshKeyStatus(); stopPreview() }
+        didSet { UserDefaults.standard.set(provider.rawValue, forKey: "narrationProvider"); apiKeyDraft = ""; refreshKeyStatus(); restorePricing(); stopPreview() }
     }
     @Published var openAIModel = UserDefaults.standard.string(forKey: "openAIModel") ?? "gpt-4o-mini-tts" { didSet {
-        UserDefaults.standard.set(openAIModel, forKey: "openAIModel")
+        UserDefaults.standard.set(openAIModel, forKey: "openAIModel"); restorePricing()
         if openAIModel.hasPrefix("tts-1"), ["ballad", "verse", "marin", "cedar"].contains(openAIVoice) { openAIVoice = "coral" }
     } }
     @Published var openAIVoice = UserDefaults.standard.string(forKey: "openAIVoice") ?? "marin" { didSet { UserDefaults.standard.set(openAIVoice, forKey: "openAIVoice") } }
-    @Published var elevenModel = UserDefaults.standard.string(forKey: "elevenModel") ?? "eleven_multilingual_v2" { didSet { UserDefaults.standard.set(elevenModel, forKey: "elevenModel") } }
+    @Published var elevenModel = UserDefaults.standard.string(forKey: "elevenModel") ?? "eleven_multilingual_v2" { didSet { UserDefaults.standard.set(elevenModel, forKey: "elevenModel"); restorePricing() } }
     @Published var elevenVoice = UserDefaults.standard.string(forKey: "elevenVoice") ?? "" { didSet { UserDefaults.standard.set(elevenVoice, forKey: "elevenVoice") } }
     @Published var apiSpeed = 1.0
     @Published var instructions = ""
@@ -52,10 +52,25 @@ final class AppModel: ObservableObject {
     @Published var exportedURL: URL?
     @Published var voiceSearch = ""
     @Published var isDropTarget = false
-    let audiobookQueue = AudiobookQueue()
+    let audiobookQueue: AudiobookQueue
+    let usageLedger: APIUsageLedger
+    let storageRoot: URL
+    @Published var usageSummary = APIUsageSummary()
+    @Published var aiCharacterLimit = UserDefaults.standard.string(forKey: "aiCharacterLimit") ?? "" { didSet { UserDefaults.standard.set(aiCharacterLimit, forKey: "aiCharacterLimit") } }
+    @Published var aiCostLimit = UserDefaults.standard.string(forKey: "aiCostLimit") ?? "" { didSet { UserDefaults.standard.set(aiCostLimit, forKey: "aiCostLimit") } }
+    @Published var aiPrice = "" { didSet { savePricing() } }
+    @Published var aiPriceBasis: APIPriceBasis = .characters { didSet { savePricing() } }
+    @Published var queueEstimate = ""
+    @Published var isEstimating = false
+    var restoringPricing = false
     @Published var selectedQueueJob: UUID? {
         didSet {
+            guard !restoringSelection else { return }
             guard selectedQueueJob != oldValue else { return }
+            guard canSelectQueue || audiobookQueue.isRunning else {
+                restoringSelection = true; selectedQueueJob = oldValue; restoringSelection = false; return
+            }
+            audiobookQueue.rememberSelection(selectedQueueJob)
             if selectedQueueJob == nil && oldValue != nil && !audiobookQueue.isRunning {
                 loadTask?.cancel(); loadGeneration = UUID(); isLoading = false
                 book = nil; selectedChapters = []; focusedChapter = nil; exportedURL = nil
@@ -69,6 +84,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(audiobookFolder?.path, forKey: "audiobookQueueFolder") }
     }
     private var queueObservation: AnyCancellable?
+    private var restoringSelection = false
     private var activeBookObservation: AnyCancellable?
     private var loadTask: Task<Void, Never>?
     private var loadGeneration = UUID()
@@ -78,8 +94,12 @@ final class AppModel: ObservableObject {
     private var exportRunner: ProcessRunner?
     private var previewRunner: ProcessRunner?
 
-    init() {
+    init(storageRoot: URL = AppData.directory) {
+        self.storageRoot = storageRoot
+        audiobookQueue = AudiobookQueue(storage: storageRoot.appendingPathComponent("queue.json"), checkpointRoot: storageRoot.appendingPathComponent("Checkpoints", isDirectory: true))
+        usageLedger = APIUsageLedger(storage: storageRoot.appendingPathComponent("ai-usage.json"))
         refreshKeyStatus()
+        restorePricing()
         activeBookObservation = audiobookQueue.$activeBook.compactMap { $0 }.sink { [weak self] value in
             guard let self else { return }
             self.loadTask?.cancel(); self.loadGeneration = UUID(); self.isLoading = false
@@ -87,12 +107,18 @@ final class AppModel: ObservableObject {
             let ids = self.audiobookQueue.jobs.first(where: { $0.id == value.id })?.chapterIDs
             self.applyBook(value.book, chapterIDs: ids)
         }
+        if let id = audiobookQueue.selectedID ?? audiobookQueue.jobs.first?.id {
+            selectedQueueJob = id
+            if let job = audiobookQueue.jobs.first(where: { $0.id == id }) { loadBook(job.source, chapterIDs: job.chapterIDs, queueID: id) }
+        }
+        refreshUsage()
         queueObservation = audiobookQueue.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }
 
-    var busy: Bool { isLoading || isCombining || loadingAPIVoices || isExporting || downloadInProgress || audiobookQueue.isRunning }
+    var busy: Bool { isEstimating || isLoading || isCombining || loadingAPIVoices || isExporting || downloadInProgress || audiobookQueue.isRunning }
+    var canSelectQueue: Bool { !isCombining && !isEstimating && !loadingAPIVoices && !isExporting && !downloadInProgress && !audiobookQueue.isRunning }
     var selectedWordCount: Int {
         book?.chapters.filter { selectedChapters.contains($0.id) }.reduce(0) { $0 + $1.wordCount } ?? 0
     }
@@ -160,8 +186,9 @@ final class AppModel: ObservableObject {
         guard let folder = audiobookFolder else { return }
         stopPreview()
         do {
-            let settings = BatchNarrationSettings(voice: voice, wordsPerMinute: Int(rate), bitrate: bitrate, mode: mode, ffmpeg: ffmpeg, api: try apiSettings())
-            try audiobookQueue.start(settings: settings, folder: folder)
+            let settings = BatchNarrationSettings(voice: voice, wordsPerMinute: Int(rate), bitrate: bitrate, mode: mode, ffmpeg: ffmpeg,
+                api: try apiSettings(), usage: usageLedger, budget: try budget(), budgets: try queuedBudgets())
+            try audiobookQueue.start(settings: settings, folder: folder, keyResolver: APIKeyStore.read)
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -307,14 +334,9 @@ final class AppModel: ObservableObject {
         if isPreviewing { stopPreview(); return }
         guard narrationReady, !busy else { return }
         let text = currentChapter?.text ?? "Welcome. This is a preview of the voice for your audiobook. Choose a speaking speed that feels comfortable to you."
-        // Use a short sample, preferring a complete sentence near the cutoff.
-        let prefix = String(text.prefix(550))
-        let sample: String
-        if let end = prefix.range(of: #"[.!?](?:\s|$)"#, options: [.regularExpression, .backwards]) {
-            sample = String(prefix[..<end.upperBound])
-        } else { sample = prefix }
+        let sample = SpeechText.preview(text, provider: provider)
         let api: APINarration?
-        do { api = try apiSettings() } catch { errorMessage = error.localizedDescription; return }
+        do { api = try apiSettings(); _ = try budget() } catch { errorMessage = error.localizedDescription; return }
         let runner = ProcessRunner()
         previewRunner = runner
         isPreviewing = true
@@ -325,13 +347,14 @@ final class AppModel: ObservableObject {
                 if let api {
                     let audio = FileManager.default.temporaryDirectory.appendingPathComponent("tts-preview-\(UUID().uuidString)." + (api.provider == .openAI ? "wav" : "mp3"))
                     defer { try? FileManager.default.removeItem(at: audio) }
-                    try await APISpeechClient().synthesize(text: sample, settings: api, destination: audio)
+                    try await APISpeechClient().synthesize(text: sample, settings: api, destination: audio, usage: usageLedger, budget: try budget())
                     try runner.checkCancellation()
                     _ = try await runner.run(URL(fileURLWithPath: "/usr/bin/afplay"), arguments: [audio.path])
                 } else {
                     _ = try await runner.run(SpeechTools.say, arguments: ["-v", chosenVoice, "-r", String(chosenRate), "--", sample])
                 }
             } catch is CancellationError {} catch { errorMessage = error.localizedDescription }
+            refreshUsage()
             isPreviewing = false
             previewRunner = nil
             previewTask = nil
@@ -347,12 +370,12 @@ final class AppModel: ObservableObject {
     func chooseDestinationAndExport() {
         guard canExport, let book, let ffmpeg else { return }
         let api: APINarration?
-        do { api = try apiSettings() } catch { errorMessage = error.localizedDescription; return }
+        do { api = try apiSettings(); _ = try budget() } catch { errorMessage = error.localizedDescription; return }
         let destination: URL
-        if mode == .single {
+        if mode != .chapters {
             let panel = NSSavePanel()
-            panel.allowedContentTypes = [.mp3]
-            panel.nameFieldStringValue = FileNames.safe(book.title) + ".mp3"
+            panel.allowedContentTypes = [UTType(filenameExtension: mode.fileExtension) ?? .audio]
+            panel.nameFieldStringValue = FileNames.safe(book.title) + "." + mode.fileExtension
             panel.prompt = "Create Audiobook"
             panel.message = "Choose a new filename for your audiobook."
             guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -376,7 +399,8 @@ final class AppModel: ObservableObject {
         }
         stopPreview()
         let options = ExportOptions(voice: voice, wordsPerMinute: Int(rate), bitrate: bitrate,
-            mode: mode, chapterIDs: selectedChapters, ffmpeg: ffmpeg, api: api)
+            mode: mode, chapterIDs: selectedChapters, ffmpeg: ffmpeg, api: api,
+            checkpoint: singleCheckpoint(book), usage: usageLedger, budget: try? budget())
         let runner = ProcessRunner()
         exportRunner = runner
         isExporting = true
@@ -402,6 +426,7 @@ final class AppModel: ObservableObject {
                 status = "Export failed."
                 progress = 0
             }
+            refreshUsage()
             isExporting = false
             exportRunner = nil
             exportTask = nil

@@ -9,7 +9,9 @@ Download fanfiction as EPUB, then turn it into an audiobook in one native Mac ap
 
 **[Download the macOS app](https://github.com/thatosxguy/FanFictoAudio/releases/latest)** · **[Installation guide](docs/installation.md)** · **[User guide](docs/usage.md)**
 
-The packaged app requires **Apple silicon and macOS 14 or later**. Python and FanFicFare are included. MP3 creation requires a separate **FFmpeg installation with libmp3lame**, including when using AI narration. This release is ad hoc signed and **not notarized**; see the installation guide before opening it.
+The packaged app requires **Apple silicon and macOS 14 or later**. Python and FanFicFare are included. Audio creation requires a separate **FFmpeg installation with libmp3lame and AAC**, including when using AI narration. Check the selected release notes for its signing and notarization status; see the installation guide before opening it.
+
+Version 1.3 adds a saved, resumable audiobook queue, per-book settings, AI usage budgets, and M4B chapter navigation with cover art. Developer builds support Developer ID signing (including a YubiKey) and Apple notarization.
 
 ## What it does
 
@@ -18,7 +20,7 @@ The packaged app requires **Apple silicon and macOS 14 or later**. Python and Fa
 - Follow the selected or active queue item in the open-book preview.
 - Combine separate EPUBs into an ordered series without changing the originals.
 - Narrate with macOS voices, OpenAI, or ElevenLabs. Provider keys are saved explicitly in macOS Keychain.
-- Export one MP3 per book or a folder of numbered chapter MP3s, with title and author metadata.
+- Export one MP3 per book, numbered chapter MP3s, or an M4B with chapter navigation and cover art.
 - Reuse a bounded EPUB cache and avoid redundant intermediate MP3 encoding steps.
 
 ```mermaid
@@ -32,6 +34,7 @@ flowchart LR
     QUEUE --> SPEECH
     SPEECH --> FFMPEG[FFmpeg]
     FFMPEG --> MP3[Single or chapter MP3s]
+    FFMPEG --> M4B[M4B with chapters and cover]
 ```
 
 ## Get started
@@ -41,7 +44,7 @@ flowchart LR
 3. Review the sections, select a speech provider and voice, and create an audiobook.
 4. For a batch, use **Add EPUBs…**, arrange the queue, then **Create Queued Audiobooks…**. To make one series, select waiting EPUBs, enter its title, and **Combine Selected EPUBs…** first.
 
-AI previews and exports send book text to the selected provider and may incur API charges. Local macOS narration and MP3 encoding run on your Mac. Queues last for the current app session. Read the [privacy documentation](PRIVACY.md) for stored settings, credentials, and network behavior.
+AI previews and exports send book text to the selected provider and may incur API charges. Local macOS narration and audio encoding run on your Mac. The audiobook queue and compatible completed passages survive app restarts. Read the [privacy documentation](PRIVACY.md) for stored settings, credentials, and network behavior.
 
 ## Documentation
 
@@ -73,7 +76,7 @@ The app is written to `dist/FanFic to Audio.app`. See [development instructions]
 
 ## Limits
 
-Only unprotected EPUBs with readable text are supported. There is no OCR, M4B output, embedded MP3 chapter navigation, persistent queue, or checkpointed audiobook resume. Downloads and narration are separate workflow steps. Site support and authentication depend on FanFicFare; interactive login and browser challenges are not handled by this interface.
+Only unprotected EPUBs with readable text are supported. There is no OCR or embedded MP3 chapter navigation; use M4B or chapter files for navigation. The download queue lasts for the app session. Site support and authentication depend on FanFicFare; interactive login and browser challenges are not handled by this interface.
 
 ## Credits and license
 

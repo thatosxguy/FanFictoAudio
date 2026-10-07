@@ -36,21 +36,27 @@ book = Path(events[-1]["path"])
 assert book.is_file()
 assert any(event.get("finalizing") for event in events)
 subprocess.run([str(args.cli), "inspect", str(book)], check=True, timeout=30)
-for mode in ("single", "chapters"):
-    destination = work / ("Downloaded Story.mp3" if mode == "single" else "Downloaded Story Chapters")
-    command = [str(args.cli), "export", str(book), str(destination), "--rate", "1000"]
+for mode in ("single", "chapters", "m4b"):
+    destination = work / ("Downloaded Story.mp3" if mode == "single" else "Downloaded Story.m4b" if mode == "m4b" else "Downloaded Story Chapters")
+    command = [str(args.cli), "export", str(book), str(destination), "--rate", "1000", "--bitrate", "192"]
     if args.voice: command.extend(["--voice", args.voice])
     if mode == "chapters": command.append("--chapters")
+    if mode == "m4b": command.append("--m4b")
     subprocess.run(command, check=True, timeout=180)
-    files = [destination] if mode == "single" else list(destination.glob("*.mp3"))
+    files = [destination] if mode != "chapters" else list(destination.glob("*.mp3"))
     assert files and all(path.stat().st_size > 1000 for path in files)
     for audio in files:
         probe = subprocess.run([args.ffprobe, "-v", "error", "-show_entries",
-            "format=duration:format_tags=title,artist,album,track", "-of", "json", str(audio)],
+            "format=duration:format_tags=title,artist,album,track:stream=codec_name,bit_rate:chapter=start_time,end_time", "-of", "json", str(audio)],
             check=True, capture_output=True, text=True)
-        details = json.loads(probe.stdout)["format"]
+        info = json.loads(probe.stdout)
+        details = info["format"]
+        if mode == "m4b":
+            assert info["chapters"] and any(s["codec_name"] == "aac" for s in info["streams"])
+        else:
+            assert info["streams"][0]["bit_rate"] == "192000"
         assert float(details["duration"]) > 0
         assert details["tags"]["title"] and details["tags"]["artist"]
         print(probe.stdout.strip())
 subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(args.app)], check=True)
-print("PASS: bundled downloader, EPUB reading order, one MP3, chapter MP3s, metadata, and bundle signature.")
+print("PASS: bundled downloader, local speech, 192 kbps MP3, chapter MP3s, M4B chapters, metadata, and bundle signature.")

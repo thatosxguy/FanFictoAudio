@@ -4,6 +4,56 @@ import Testing
 
 @MainActor
 struct AudiobookQueueTests {
+    @Test func persistsOrderSelectionSectionsAndSecretFreeSettings() throws {
+        let root = try fixtureDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let sources = try fixtures(root, names: ["one.epub", "two.epub"])
+        let storage = root.appendingPathComponent("queue.json")
+        let queue = AudiobookQueue(storage: storage)
+        queue.add(sources)
+        let first = queue.jobs[0].id
+        queue.move(first, by: 1)
+        let api = APINarration(provider: .openAI, model: "test", voice: "marin", apiKey: "never-store-this-key")
+        queue.updateSettings(first, chapterIDs: ["extra"], narration: NarrationPreset(voice: "", wordsPerMinute: 175, bitrate: 192, mode: .m4b, api: api))
+        queue.rememberSelection(first)
+        let restored = AudiobookQueue(storage: storage)
+        #expect(restored.jobs.map(\.id) == queue.jobs.map(\.id))
+        #expect(restored.jobs.map(\.source) == [sources[1], sources[0]])
+        #expect(restored.jobs[1].chapterIDs == ["extra"])
+        #expect(restored.jobs[1].narration?.mode == .m4b)
+        #expect(restored.selectedID == first)
+        #expect(!String(decoding: try Data(contentsOf: storage), as: UTF8.self).contains("never-store-this-key"))
+        // Simulate a crash while a job is running; it must become resumable.
+        var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: storage)) as? [String: Any])
+        var jobs = try #require(json["jobs"] as? [[String: Any]])
+        jobs[0]["state"] = "Converting"; json["jobs"] = jobs
+        try JSONSerialization.data(withJSONObject: json).write(to: storage)
+        #expect(AudiobookQueue(storage: storage).jobs[0].state == .queued)
+    }
+
+    @Test func corruptSavedQueueIsPreservedAndReported() throws {
+        let root = try fixtureDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let storage = root.appendingPathComponent("queue.json")
+        let original = Data("invalid saved queue".utf8); try original.write(to: storage)
+        let queue = AudiobookQueue(storage: storage)
+        #expect(queue.persistenceError != nil)
+        queue.add([root.appendingPathComponent("new.epub")])
+        #expect(try Data(contentsOf: storage) == original)
+        #expect(throws: (any Error).self) { try queue.start(settings: settings(), folder: root) }
+    }
+
+    @Test func budgetStopPausesRemainingJobs() async throws {
+        let root = try fixtureDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let sources = try fixtures(root, names: ["one.epub", "two.epub"])
+        let queue = AudiobookQueue(reader: Self.readFixture, exporter: { _, _, _, _, _ in
+            throw APIUsageError.budgetReached("Budget reached")
+        })
+        queue.add(sources)
+        try queue.start(settings: settings(), folder: root)
+        await queue.waitUntilFinished()
+        #expect(queue.jobs.map(\.state) == [.failed, .queued])
+        #expect(queue.summary.contains("paused"))
+    }
+
     @Test func processesBooksSequentiallyContinuesAfterFailureAndPreservesOutputs() async throws {
         let root = try fixtureDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -32,6 +82,7 @@ struct AudiobookQueueTests {
         // Fix the failed source and retry only that job with new settings.
         try "fixed".write(to: sources[1], atomically: true, encoding: .utf8)
         queue.retry(queue.jobs[1].id)
+        queue.updateSettings(queue.jobs[1].id, chapterIDs: ["one"], narration: nil)
         try queue.start(settings: settings(voice: "Retry Voice"), folder: output)
         await queue.waitUntilFinished()
         #expect(queue.jobs.allSatisfy { $0.state == .done })

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum NarrationProvider: String, CaseIterable, Identifiable, Sendable {
+public enum NarrationProvider: String, CaseIterable, Identifiable, Sendable, Codable {
     case system = "macOS voices", openAI = "OpenAI", elevenLabs = "ElevenLabs"
     public var id: String { rawValue }
     public var speedRange: ClosedRange<Double> { self == .elevenLabs ? 0.7...1.2 : 0.25...4 }
@@ -66,8 +66,12 @@ public struct APISpeechClient: Sendable {
         return request
     }
 
-    public func synthesize(text: String, settings: APINarration, destination: URL) async throws {
+    public func synthesize(text: String, settings: APINarration, destination: URL,
+                           usage: APIUsageLedger? = nil, budget: APIBudget? = nil) async throws {
         let request = try speechRequest(text: text, settings: settings)
+        try Task.checkCancellation()
+        // Reserve before dispatch. Failed or cancelled requests may still be billed.
+        if let usage { try await usage.reserve(text: text, settings: settings, budget: budget) }
         let (data, response) = try await transport(request)
         try Task.checkCancellation()
         try Self.check(response, provider: settings.provider)
@@ -119,11 +123,7 @@ public struct APISpeechClient: Sendable {
         }
     }
     public static func download(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 180
-        config.timeoutIntervalForResource = 300
-        let session = URLSession(configuration: config, delegate: NoSpeechRedirects(), delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
+        let session = pooledSession
         let downloaded: (URL, URLResponse)
         do { downloaded = try await session.download(for: request) }
         catch { if Task.isCancelled { throw CancellationError() }; throw error }
@@ -136,6 +136,15 @@ public struct APISpeechClient: Sendable {
         }
         return (try Data(contentsOf: file), http)
     }
+    // Reuse connections across passages. Authentication stays on each request;
+    // cookies and credential storage are disabled for both providers.
+    private static let pooledSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 300
+        config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCredentialStorage = nil
+        return URLSession(configuration: config, delegate: NoSpeechRedirects(), delegateQueue: nil)
+    }()
 }
 
 private final class NoSpeechRedirects: NSObject, URLSessionTaskDelegate, Sendable {

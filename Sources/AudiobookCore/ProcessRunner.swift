@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public struct ProcessOutput: Sendable {
     public let standardOutput: String
@@ -9,15 +10,44 @@ public struct ProcessOutput: Sendable {
 // cancelling between two commands cannot leave the next command running.
 public final class ProcessRunner: @unchecked Sendable {
     private let lock = NSLock()
+    // Blocking process waits must not occupy Swift's cooperative task threads.
+    private let executionQueue = DispatchQueue(label: "FanFicToAudio.process", qos: .userInitiated)
+    private static let controlQueue = DispatchQueue(label: "FanFicToAudio.process-control", qos: .userInitiated)
     private var active: Process?
     private var cancelled = false
-    public init() {}
+    private var timedOut = false
+    private let cancellationGrace: TimeInterval
+    private let commandTimeout: TimeInterval
+    public init(cancellationGrace: TimeInterval = 1, commandTimeout: TimeInterval = 1800) {
+        self.cancellationGrace = max(0.05, cancellationGrace)
+        self.commandTimeout = max(0.05, commandTimeout)
+    }
 
     public func cancel() {
         lock.lock()
         cancelled = true
-        if let active, active.isRunning { active.terminate() }
+        if let active { terminate(active) }
         lock.unlock()
+    }
+
+    // Called under the lock. Identity checks prevent a delayed signal reaching
+    // a later command or a reused process identifier.
+    private func terminate(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        Self.controlQueue.asyncAfter(deadline: .now() + cancellationGrace) { [self] in
+            lock.lock()
+            defer { lock.unlock() }
+            if active === process, process.isRunning { _ = Darwin.kill(process.processIdentifier, SIGKILL) }
+        }
+    }
+
+    private func expire(_ process: Process) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard active === process, process.isRunning else { return }
+        timedOut = true
+        terminate(process)
     }
 
     public func checkCancellation() throws {
@@ -30,7 +60,12 @@ public final class ProcessRunner: @unchecked Sendable {
     public func run(_ executable: URL, arguments: [String]) async throws -> ProcessOutput {
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            return try await Task.detached { [self] in try runSync(executable, arguments: arguments) }.value
+            return try await withCheckedThrowingContinuation { continuation in
+                executionQueue.async { [self] in
+                    do { continuation.resume(returning: try runSync(executable, arguments: arguments)) }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
         } onCancel: { self.cancel() }
     }
 
@@ -54,15 +89,24 @@ public final class ProcessRunner: @unchecked Sendable {
         lock.lock()
         if cancelled { lock.unlock(); throw CancellationError() }
         active = process
+        timedOut = false
         do { try process.run() }
         catch { active = nil; lock.unlock(); throw error }
         lock.unlock()
+        let deadline = DispatchSource.makeTimerSource(queue: Self.controlQueue)
+        deadline.setEventHandler { [weak self] in self?.expire(process) }
+        deadline.schedule(deadline: .now() + commandTimeout)
+        deadline.resume()
         process.waitUntilExit()
+        deadline.setEventHandler {}
+        deadline.cancel()
         lock.lock()
         active = nil
         let stopped = cancelled
+        let expired = timedOut
         lock.unlock()
         if stopped { throw CancellationError() }
+        if expired { throw AudiobookError.conversion("\(executable.lastPathComponent) exceeded its command timeout. Completed passages are retained for retry.") }
         let stdout = try tail(outURL)
         let stderr = try tail(errURL)
         guard process.terminationStatus == 0 else {
@@ -98,13 +142,14 @@ public enum SpeechTools {
         return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }).map { URL(fileURLWithPath: $0) }
     }
 
-    public static func verifyFFmpeg(_ url: URL, runner: ProcessRunner) async throws {
+    public static func verifyFFmpeg(_ url: URL, runner: ProcessRunner, mode: ExportMode = .single) async throws {
         guard FileManager.default.isExecutableFile(atPath: url.path) else {
-            throw AudiobookError.conversion("Select an executable FFmpeg binary to encode MP3 audio.")
+            throw AudiobookError.conversion("Select an executable FFmpeg binary to encode audiobook audio.")
         }
         let result = try await runner.run(url, arguments: ["-hide_banner", "-encoders"])
-        guard result.standardOutput.contains("libmp3lame") else {
-            throw AudiobookError.conversion("This FFmpeg build does not include the libmp3lame MP3 encoder.")
+        guard result.standardOutput.contains(mode == .m4b ? " aac " : "libmp3lame") else {
+            let encoder = mode == .m4b ? "AAC" : "libmp3lame MP3"
+            throw AudiobookError.conversion("This FFmpeg build does not include the \(encoder) encoder.")
         }
     }
 }

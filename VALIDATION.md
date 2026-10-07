@@ -1,6 +1,21 @@
 # Validation
 
-Last reviewed: October 6, 2026. Release: **1.2.0**, build **3**.
+Last checked: October 6, 2026. Candidate: **1.3.0**, build **4**.
+
+## Version 1.3 checks
+
+- **49 native tests passed**: 43 audiobook tests, 5 download-bridge tests, and 1 application-model selection test. Parameterized bitrate/provider cases are included within those tests.
+- **36 Python tests passed**, with two upstream deprecation warnings. Its HTTP connection test uses a loopback server.
+- New coverage includes multilingual/grapheme preview bounds, cancelling a SIGTERM-ignoring child, command deadlines, queue restoration and corruption preservation, per-book presets without serialized credentials, budget stops before dispatch, usage recovery, checksum-based checkpoints, resume without resending completed passages, all four MP3 bitrates, and M4B chapter/cover metadata.
+- The M4B integration check uses synthetic WAV audio and a synthetic cover through the real AAC encoder and FFprobe. Live provider calls remain mocked; no paid TTS requests were made.
+- The packaged downloader/local narration smoke check passed for a single MP3, chapter MP3s, and M4B chapter navigation, with metadata, positive durations, and 192 kbps MP3 streams verified by FFprobe. The app bundle passed deep/strict signature verification.
+- Native interface checks covered selecting two EPUBs in one file picker, selecting a queue row to open the matching EPUB, moving rows, saving a per-book M4B preset, and restoring queue order, selection, and presets after relaunch. These checks used synthetic books; drag gestures were not verified.
+- A local test executable was signed with the YubiKey Developer ID Application identity, hardened runtime, and a secure timestamp. The full release signing/notarization checks are recorded in the candidate release notes; a test executable signature alone does not verify the whole bundle.
+- The supplied 1.3 development bundle is ad hoc signed and **not notarized**. Developer ID distribution validation is deferred; no successful full-bundle Developer ID or Apple notarization result is claimed.
+
+The evidence below records version 1.2's earlier validation, not proof that every native UI or distribution check has been repeated for version 1.3.
+
+## Version 1.2 historical validation
 
 ## Automated checks
 

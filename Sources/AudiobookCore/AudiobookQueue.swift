@@ -1,12 +1,12 @@
 import Foundation
 import Combine
 
-public enum AudiobookJobState: String, Sendable {
+public enum AudiobookJobState: String, Sendable, Codable {
     case queued = "Queued", running = "Converting", done = "Done", failed = "Failed", cancelled = "Cancelled"
 }
 
-public struct AudiobookJob: Identifiable, Sendable {
-    public let id = UUID()
+public struct AudiobookJob: Identifiable, Sendable, Codable {
+    public var id = UUID()
     public let source: URL
     public var title: String
     public var author = ""
@@ -14,7 +14,8 @@ public struct AudiobookJob: Identifiable, Sendable {
     public var progress = 0.0
     public var message = "Waiting to convert."
     public var output: URL?
-    public let chapterIDs: Set<String>?
+    public var chapterIDs: Set<String>?
+    public var narration: NarrationPreset?
 
     public init(source: URL, chapterIDs: Set<String>? = nil) {
         self.source = source
@@ -30,9 +31,14 @@ public struct BatchNarrationSettings: Sendable {
     public let mode: ExportMode
     public let ffmpeg: URL
     public let api: APINarration?
-    public init(voice: String, wordsPerMinute: Int, bitrate: Int, mode: ExportMode, ffmpeg: URL, api: APINarration? = nil) {
+    public let usage: APIUsageLedger?
+    public let budget: APIBudget?
+    public let budgets: [String: APIBudget]
+    public init(voice: String, wordsPerMinute: Int, bitrate: Int, mode: ExportMode, ffmpeg: URL, api: APINarration? = nil, usage: APIUsageLedger? = nil, budget: APIBudget? = nil, budgets: [String: APIBudget] = [:]) {
         self.voice = voice; self.wordsPerMinute = wordsPerMinute; self.bitrate = bitrate
         self.mode = mode; self.ffmpeg = ffmpeg; self.api = api
+        self.usage = usage; self.budget = budget
+        self.budgets = budgets
     }
 }
 
@@ -42,7 +48,14 @@ public final class AudiobookQueue: ObservableObject {
     public typealias Reader = @Sendable (URL) async throws -> EPUBBook
     public typealias Exporter = @Sendable (EPUBBook, ExportOptions, URL, ProcessRunner, @escaping @Sendable (ExportProgress) -> Void) async throws -> URL
 
-    @Published public private(set) var jobs: [AudiobookJob] = []
+    @Published public private(set) var jobs: [AudiobookJob] = [] { didSet { persist() } }
+    @Published public private(set) var persistenceError: String?
+    public var onCompletion: ((String) -> Void)?
+    private let storage: URL?
+    private let checkpointRoot: URL?
+    private var persistenceBlocked = false
+    public private(set) var selectedID: UUID?
+    private struct Snapshot: Codable { let version: Int; let jobs: [AudiobookJob]; let selectedID: UUID? }
     @Published public private(set) var activeBook: (id: UUID, book: EPUBBook)?
     @Published public private(set) var isRunning = false
     @Published public private(set) var summary = "Add EPUBs to create several audiobooks."
@@ -55,16 +68,42 @@ public final class AudiobookQueue: ObservableObject {
     private var batchIDs: [UUID] = []
     private var batchFinished = 0
 
-    public init(reader: @escaping Reader = { url in
+    public init(storage: URL? = nil, checkpointRoot: URL? = nil, reader: @escaping Reader = { url in
         try await EPUBLibrary.shared.read(url)
     }, exporter: @escaping Exporter = { book, options, destination, runner, progress in
         try await AudiobookExporter.export(book: book, options: options, destination: destination,
             runner: runner, progress: progress)
     }) {
         self.reader = reader; self.exporter = exporter
+        self.storage = storage; self.checkpointRoot = checkpointRoot
+        if let storage, FileManager.default.fileExists(atPath: storage.path) {
+            do {
+                let saved = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: storage))
+                guard saved.version == 1, Set(saved.jobs.map(\.id)).count == saved.jobs.count else {
+                    throw AudiobookError.conversion("Unsupported saved queue format.")
+                }
+                jobs = saved.jobs.map { job in
+                    var recovered = job
+                    if recovered.state == .running {
+                        if let output = recovered.output, FileManager.default.fileExists(atPath: output.path) {
+                            recovered.state = .done; recovered.progress = 1; recovered.message = "Recovered completed audiobook."
+                        } else {
+                            recovered.state = .queued; recovered.message = "Interrupted. Start the queue to resume completed passages."
+                        }
+                    }
+                    return recovered
+                }
+                selectedID = saved.selectedID
+                summary = "Restored \(jobs.count) queue entries."
+            } catch {
+                persistenceBlocked = true
+                persistenceError = "Saved queue could not be read; the original file has been preserved. \(error.localizedDescription)"
+            }
+        }
     }
 
     public var queuedCount: Int { jobs.filter { $0.state == .queued }.count }
+    public func rememberSelection(_ id: UUID?) { selectedID = id; persist() }
 
     @discardableResult public func add(_ urls: [URL], chapterIDs: Set<String>? = nil) -> Int {
         guard !isRunning else { return 0 }
@@ -83,6 +122,7 @@ public final class AudiobookQueue: ObservableObject {
     public func remove(_ id: UUID) {
         guard !isRunning else { return }
         jobs.removeAll { $0.id == id }
+        discardCheckpoint(id)
     }
 
     public func canMove(_ id: UUID, by offset: Int) -> Bool {
@@ -99,6 +139,7 @@ public final class AudiobookQueue: ObservableObject {
         guard !isRunning, ids.count >= 2,
               jobs.filter({ ids.contains($0.id) && $0.state == .queued }).count == ids.count,
               let first = jobs.firstIndex(where: { ids.contains($0.id) }) else { return }
+        for id in ids { discardCheckpoint(id) }
         jobs.removeAll { ids.contains($0.id) }
         jobs.insert(AudiobookJob(source: source), at: first)
         summary = "Combined EPUB added to the queue."
@@ -111,6 +152,7 @@ public final class AudiobookQueue: ObservableObject {
 
     public func clearFinished() {
         guard !isRunning else { return }
+        for job in jobs where job.state == .done { discardCheckpoint(job.id) }
         jobs.removeAll { $0.state == .done }
     }
 
@@ -120,14 +162,54 @@ public final class AudiobookQueue: ObservableObject {
         jobs[index].message = "Waiting to retry."; jobs[index].output = nil
     }
 
-    public func start(settings: BatchNarrationSettings, folder: URL) throws {
+    public func updateSettings(_ id: UUID, chapterIDs: Set<String>, narration: NarrationPreset?) {
+        guard !isRunning, let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].state != .done else { return }
+        jobs[index].chapterIDs = chapterIDs; jobs[index].narration = narration
+    }
+
+    public func move(_ id: UUID, before target: UUID) {
+        guard !isRunning, id != target, let from = jobs.firstIndex(where: { $0.id == id }) else { return }
+        let job = jobs.remove(at: from)
+        if let to = jobs.firstIndex(where: { $0.id == target }) { jobs.insert(job, at: to) }
+        else { jobs.insert(job, at: min(from, jobs.count)) }
+    }
+
+    public func discardCheckpoint(_ id: UUID) {
+        guard !isRunning else { return }
+        if let root = checkpointRoot { try? FileManager.default.removeItem(at: root.appendingPathComponent(id.uuidString)) }
+    }
+
+    private func persist() {
+        guard !persistenceBlocked, let storage else { return }
+        do {
+            try FileManager.default.createDirectory(at: storage.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(Snapshot(version: 1, jobs: jobs, selectedID: selectedID)).write(to: storage, options: .atomic)
+            if persistenceError != nil { persistenceError = nil }
+        } catch { persistenceError = "Could not save the queue: \(error.localizedDescription)" }
+    }
+
+    public func start(settings: BatchNarrationSettings, folder: URL,
+                      keyResolver: @escaping @Sendable (NarrationProvider) throws -> String = { _ in "" }) throws {
         guard !isRunning, queuedCount > 0 else { return }
+        guard !persistenceBlocked else { throw AudiobookError.conversion(persistenceError ?? "The saved queue needs recovery.") }
         try settings.api?.validate()
         guard (settings.api != nil || !settings.voice.isEmpty), SpeechRate.allowedRange.contains(settings.wordsPerMinute), [64, 96, 128, 192].contains(settings.bitrate) else {
             throw AudiobookError.conversion("Choose a voice, valid speaking speed, and MP3 quality before starting the queue.")
         }
         guard folder.isFileURL else { throw AudiobookError.conversion("Choose a local output folder.") }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let preset = NarrationPreset(voice: settings.voice, wordsPerMinute: settings.wordsPerMinute,
+            bitrate: settings.bitrate, mode: settings.mode, api: settings.api)
+        var keys: [NarrationProvider: String] = [:]
+        // Resolve credentials before starting the batch, without writing them to disk.
+        for job in jobs where job.state == .queued {
+            let provider = (job.narration ?? preset).provider
+            if provider != .system, keys[provider] == nil {
+                keys[provider] = provider == settings.api?.provider ? settings.api?.apiKey : try keyResolver(provider)
+                try (job.narration ?? preset).api(key: keys[provider] ?? "")?.validate()
+            }
+        }
+        for index in jobs.indices where jobs[index].state == .queued && jobs[index].narration == nil { jobs[index].narration = preset }
         batchIDs = jobs.filter { $0.state == .queued }.map(\.id)
         batchFinished = 0; batchProgress = 0; pauseRequested = false; isRunning = true
         summary = "Starting \(batchIDs.count) " + (batchIDs.count == 1 ? "audiobook…" : "audiobooks…")
@@ -150,18 +232,30 @@ public final class AudiobookQueue: ObservableObject {
                     jobs[index].title = book.title; jobs[index].author = book.author
                     activeBook = (id, book)
                     let chapterIDs = selectedIDs ?? Set(book.chapters.filter(\.includedByDefault).map(\.id))
-                    let options = ExportOptions(voice: settings.voice, wordsPerMinute: settings.wordsPerMinute,
-                        bitrate: settings.bitrate, mode: settings.mode, chapterIDs: chapterIDs, ffmpeg: settings.ffmpeg, api: settings.api)
-                    let destination = Self.uniqueDestination(title: book.title, folder: folder, mode: settings.mode)
+                    let narration = jobs[index].narration ?? preset
+                    let budget = settings.budgets[narration.pricingID] ?? (narration.provider == settings.api?.provider && narration.model == settings.api?.model
+                        ? settings.budget : APIBudget(characterLimit: settings.budget?.characterLimit, costLimit: settings.budget?.costLimit))
+                    let options = ExportOptions(voice: narration.voice, wordsPerMinute: narration.wordsPerMinute,
+                        bitrate: narration.bitrate, mode: narration.mode, chapterIDs: chapterIDs, ffmpeg: settings.ffmpeg,
+                        api: narration.api(key: keys[narration.provider] ?? ""),
+                        checkpoint: checkpointRoot?.appendingPathComponent(id.uuidString), usage: settings.usage, budget: budget)
+                    let destination = Self.uniqueDestination(title: book.title, folder: folder, mode: narration.mode)
+                    jobs[index].output = destination
                     let result = try await exporter(book, options, destination, processRunner) { [weak self] update in
                         Task { @MainActor [weak self] in self?.receive(update, id: id) }
                     }
                     jobs[index].output = result; jobs[index].state = .done
                     jobs[index].progress = 1; jobs[index].message = "Audiobook ready."
                 } catch is CancellationError {
+                    jobs[index].output = nil
                     jobs[index].state = .cancelled; jobs[index].progress = 0
-                    jobs[index].message = "Cancelled. Retry to convert this EPUB again."
+                    jobs[index].message = "Paused. Retry to resume completed passages."
+                } catch let error as APIUsageError {
+                    jobs[index].output = nil; jobs[index].state = .failed
+                    jobs[index].message = error.localizedDescription
+                    pauseRequested = true
                 } catch {
+                    jobs[index].output = nil
                     jobs[index].state = .failed; jobs[index].progress = 0
                     jobs[index].message = error.localizedDescription
                 }
@@ -177,6 +271,8 @@ public final class AudiobookQueue: ObservableObject {
                 summary = "\(completed) " + (completed == 1 ? "audiobook ready" : "audiobooks ready") + (failed > 0 ? "; \(failed) failed. Select a failed row to retry." : ".")
             }
             isRunning = false; task = nil
+            persist()
+            onCompletion?(summary)
         }
     }
 
@@ -201,7 +297,7 @@ public final class AudiobookQueue: ObservableObject {
         var suffix = 1
         while true {
             let stem = suffix == 1 ? name : "\(name) (\(suffix))"
-            let url = folder.appendingPathComponent(mode == .single ? stem + ".mp3" : stem, isDirectory: mode == .chapters)
+            let url = folder.appendingPathComponent(mode == .chapters ? stem : stem + "." + mode.fileExtension, isDirectory: mode == .chapters)
             if !FileManager.default.fileExists(atPath: url.path) { return url }
             suffix += 1
         }
