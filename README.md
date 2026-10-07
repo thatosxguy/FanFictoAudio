@@ -59,7 +59,7 @@ AI previews and exports send book text to the selected provider and may incur AP
 | [Changelog](CHANGELOG.md) | Release history |
 | [Contributing](CONTRIBUTING.md) | Changes, tests, useful bug reports |
 | [Privacy](PRIVACY.md) / [Security](SECURITY.md) | Data handling and private vulnerability reports |
-| [Publisher Privacy Policy](PRIVACY-POLICY.md) / [Terms of Service](TERMS-OF-SERVICE.md) | Dr. Matt Booth's project and support policies |
+| [Publisher Privacy Policy](https://github.com/thatosxguy/policies/blob/main/PRIVACY-POLICY.md) / [Terms of Service](https://github.com/thatosxguy/policies/blob/main/TERMS-OF-SERVICE.md) | Dr. Matt Booth's project and support policies |
 
 ## Build from source
 
