@@ -2,6 +2,8 @@
 
 This describes version 1.3.0 of FanFic to Audio. The app has no application analytics or telemetry implementation and no developer-operated backend.
 
+For Dr. Matt Booth's handling of support correspondence, contributions, and privacy requests, see the [Publisher Privacy Policy](PRIVACY-POLICY.md). The project's [Terms of Service](TERMS-OF-SERVICE.md) preserve its open-source license rights. Contact [admin@strixmcs.com](mailto:admin@strixmcs.com) for privacy questions.
+
 ## Local data
 
 - EPUB downloads, combined series, and MP3/M4B outputs are written to the destinations you choose. Updating an existing FanFicFare book creates a backup beside it.
